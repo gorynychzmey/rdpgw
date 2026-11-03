@@ -36,6 +36,7 @@ type Config struct {
 	EnableUserToken    bool
 	Hosts              []string
 	HostSelection      string
+	Apps               []App
 	GatewayAddress     *url.URL
 	RdpOpts            RdpOpts
 	TemplateFile       string
@@ -83,6 +84,7 @@ type Handler struct {
 	gatewayAddress     *url.URL
 	hosts              []string
 	hostSelection      string
+	apps               []App
 	rdpOpts            RdpOpts
 	rdpDefaults        string
 	rdpSigner          *rdpsign.Signer
@@ -95,6 +97,9 @@ func (c *Config) NewHandler() *Handler {
 	if len(c.Hosts) < 1 {
 		log.Fatal("Not enough hosts to connect to specified")
 	}
+	if err := validateApps(c.Apps, c.Hosts); err != nil {
+		log.Fatal("Invalid apps configuration: ", err)
+	}
 
 	handler := &Handler{
 		paaTokenGenerator:  c.PAATokenGenerator,
@@ -105,6 +110,7 @@ func (c *Config) NewHandler() *Handler {
 		gatewayAddress:     c.GatewayAddress,
 		hosts:              c.Hosts,
 		hostSelection:      c.HostSelection,
+		apps:               c.Apps,
 		rdpOpts:            c.RdpOpts,
 		rdpDefaults:        c.TemplateFile,
 		templatesPath:      c.TemplatesPath,
@@ -336,7 +342,8 @@ const fallbackHTMLTemplate = `<!DOCTYPE html>
         async function connectToServer() {
             if (!selectedServer) return;
             let url = '/connect';
-            if (selectedServer.address) url += '?host=' + encodeURIComponent(selectedServer.address);
+            if (selectedServer.app) url += '?app=' + encodeURIComponent(selectedServer.app);
+            else if (selectedServer.address) url += '?host=' + encodeURIComponent(selectedServer.address);
             window.location.href = url;
         }
         document.addEventListener('DOMContentLoaded', loadServers);
@@ -412,11 +419,24 @@ func (h *Handler) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// determine host to connect to
-	host, err := h.getHost(ctx, r.URL)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	// determine host to connect to; a RemoteApp brings its own host
+	var app *App
+	var host string
+	var err error
+	if appId := r.URL.Query().Get("app"); appId != "" {
+		app = h.findApp(appId)
+		if app == nil {
+			log.Printf("Invalid app %s specified in client request", appId)
+			http.Error(w, "invalid app specified in query parameter", http.StatusBadRequest)
+			return
+		}
+		host = app.Host
+	} else {
+		host, err = h.getHost(ctx, r.URL)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 	host = strings.Replace(host, "{{ preferred_username }}", id.UserName(), 1)
 
@@ -497,6 +517,13 @@ func (h *Handler) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	d.Settings.GatewayCredentialMethod = 1
 	d.Settings.GatewayUsageMethod = 1
 
+	if app != nil {
+		d.Settings.RemoteApplicationMode = true
+		d.Settings.RemoteApplicationProgram = app.Program
+		d.Settings.RemoteApplicationName = app.Name
+		d.Settings.RemoteApplicationCmdLine = app.CmdLine
+	}
+
 	// no rdp siging so return as-is
 	if h.rdpSigner == nil {
 		http.ServeContent(w, r, fn, time.Now(), strings.NewReader(d.String()))
@@ -525,6 +552,7 @@ type Host struct {
 	Address     string `json:"address"`
 	Description string `json:"description"`
 	IsDefault   bool   `json:"isDefault"`
+	App         string `json:"app,omitempty"`
 }
 
 // UserInfo represents the current authenticated user
@@ -565,6 +593,16 @@ func (h *Handler) HandleHostList(w http.ResponseWriter, r *http.Request) {
 				IsDefault:   i == 0,
 			})
 		}
+	}
+
+	for _, a := range h.apps {
+		hosts = append(hosts, Host{
+			ID:          "app_" + a.Id,
+			Name:        a.Name,
+			Address:     a.Host,
+			Description: fmt.Sprintf("Open %s on %s", a.Name, a.Host),
+			App:         a.Id,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

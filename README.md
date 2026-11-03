@@ -168,6 +168,16 @@ Server:
  #  - unsigned, a listed host specified in the query parameter
  #  - any, insecurely allow any host specified in the query parameter
  HostSelection: roundrobin 
+ # optional RemoteApps: single programs instead of a full desktop. The client
+ # downloads them with /connect?app=<Id>; they are also listed in the web UI.
+ # Host must be one of Hosts. Program is the remoteapplicationprogram value,
+ # "||<alias>" for an alias registered in the host's TSAppAllowList.
+ Apps:
+  - Id: edge
+    Name: Microsoft Edge
+    Host: localhost:3389
+    Program: "||edge"
+    CmdLine: ""
  # a random strings of at least 32 characters to secure cookies on the client
  # make sure to share this across the different pods
  SessionKey: thisisasessionkeyreplacethisjetzt

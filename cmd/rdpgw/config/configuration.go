@@ -40,22 +40,33 @@ type Configuration struct {
 }
 
 type ServerConfig struct {
-	GatewayAddress       string   `koanf:"gatewayaddress"`
-	Port                 int      `koanf:"port"`
-	CertFile             string   `koanf:"certfile"`
-	KeyFile              string   `koanf:"keyfile"`
-	Hosts                []string `koanf:"hosts"`
-	HostSelection        string   `koanf:"hostselection"`
-	SessionKey           string   `koanf:"sessionkey"`
-	SessionEncryptionKey string   `koanf:"sessionencryptionkey"`
-	SessionStore         string   `koanf:"sessionstore"`
-	MaxSessionLength     int      `koanf:"maxsessionlength"`
-	SendBuf              int      `koanf:"sendbuf"`
-	ReceiveBuf           int      `koanf:"receivebuf"`
-	Tls                  string   `koanf:"tls"`
-	Authentication       []string `koanf:"authentication"`
-	AuthSocket           string   `koanf:"authsocket"`
-	BasicAuthTimeout     int      `koanf:"basicauthtimeout"`
+	GatewayAddress       string      `koanf:"gatewayaddress"`
+	Port                 int         `koanf:"port"`
+	CertFile             string      `koanf:"certfile"`
+	KeyFile              string      `koanf:"keyfile"`
+	Hosts                []string    `koanf:"hosts"`
+	HostSelection        string      `koanf:"hostselection"`
+	Apps                 []AppConfig `koanf:"apps"`
+	SessionKey           string      `koanf:"sessionkey"`
+	SessionEncryptionKey string      `koanf:"sessionencryptionkey"`
+	SessionStore         string      `koanf:"sessionstore"`
+	MaxSessionLength     int         `koanf:"maxsessionlength"`
+	SendBuf              int         `koanf:"sendbuf"`
+	ReceiveBuf           int         `koanf:"receivebuf"`
+	Tls                  string      `koanf:"tls"`
+	Authentication       []string    `koanf:"authentication"`
+	AuthSocket           string      `koanf:"authsocket"`
+	BasicAuthTimeout     int         `koanf:"basicauthtimeout"`
+}
+
+// AppConfig publishes a single program as a RemoteApp. Host must be one of
+// Server.Hosts; Program is the remoteapplicationprogram value, e.g. "||edge".
+type AppConfig struct {
+	Id      string `koanf:"id"`
+	Name    string `koanf:"name"`
+	Host    string `koanf:"host"`
+	Program string `koanf:"program"`
+	CmdLine string `koanf:"cmdline"`
 }
 
 type KerberosConfig struct {
@@ -70,9 +81,9 @@ type OpenIDConfig struct {
 }
 
 type HeaderConfig struct {
-	UserHeader      string `koanf:"userheader"`
-	UserIdHeader    string `koanf:"useridheader"`
-	EmailHeader     string `koanf:"emailheader"`
+	UserHeader        string `koanf:"userheader"`
+	UserIdHeader      string `koanf:"useridheader"`
+	EmailHeader       string `koanf:"emailheader"`
 	DisplayNameHeader string `koanf:"displaynameheader"`
 }
 

@@ -108,6 +108,7 @@ func main() {
 		EnableUserToken:  conf.Security.EnableUserToken,
 		Hosts:            conf.Server.Hosts,
 		HostSelection:    conf.Server.HostSelection,
+		Apps:             webApps(conf.Server.Apps),
 		RdpOpts: web.RdpOpts{
 			UsernameTemplate: conf.Client.UsernameTemplate,
 			SplitUserDomain:  conf.Client.SplitUserDomain,
@@ -331,4 +332,12 @@ func main() {
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
+}
+
+func webApps(apps []config.AppConfig) []web.App {
+	res := make([]web.App, 0, len(apps))
+	for _, a := range apps {
+		res = append(res, web.App{Id: a.Id, Name: a.Name, Host: a.Host, Program: a.Program, CmdLine: a.CmdLine})
+	}
+	return res
 }
