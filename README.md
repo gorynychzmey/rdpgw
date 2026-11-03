@@ -157,6 +157,9 @@ Server:
  GatewayAddress: localhost
  # port to listen on (change to 80 or equivalent if not using TLS)
  Port: 443
+ # local address to bind both the gateway and automatic TLS challenge listeners.
+ # Empty binds to all interfaces. IPv4 and IPv6 addresses are supported.
+ # BindAddress: 127.0.0.1
  # list of acceptable desktop hosts to connect to
  Hosts:
   - localhost:3389
@@ -166,8 +169,24 @@ Server:
  #  - roundrobin, which selects a random host from the list (default)
  #  - signed, a listed host specified in the signed query parameter
  #  - unsigned, a listed host specified in the query parameter
- #  - any, insecurely allow any host specified in the query parameter
+ #  - any, allow any host specified in the query parameter, gated by the
+ #    AllowedDestinationPorts / AllowPrivateDestinations options below.
  HostSelection: roundrobin 
+ # When HostSelection: any, only these TCP ports may be forwarded to.
+ # Empty defaults to [3389]. Ignored for the curated host modes
+ # (roundrobin, signed, unsigned).
+ # AllowedDestinationPorts:
+ #  - 3389
+ # When HostSelection: any, refuse to forward to loopback / RFC1918 /
+ # link-local / IPv6 ULA / unspecified / multicast destinations unless
+ # this is true. Default false. Has no effect on the curated host modes.
+ # AllowPrivateDestinations: false
+ # CIDR allow-list of upstream proxies whose X-Forwarded-For header is
+ # trusted when deriving the client IP. Empty (default) makes the
+ # gateway ignore X-Forwarded-For and use the request's RemoteAddr.
+ # Set this to the proxy/load-balancer subnet that fronts the gateway.
+ # TrustedProxies:
+ #  - 10.0.0.0/8
  # a random strings of at least 32 characters to secure cookies on the client
  # make sure to share this across the different pods
  SessionKey: thisisasessionkeyreplacethisjetzt
@@ -286,6 +305,45 @@ Point your browser to `https://your-gateway/connect`. After authentication
 and RDP file will download to your desktop. This file can be opened by one
 of the remote desktop clients and it will try to connect to the gateway and
 desktop host behind it.
+
+### Overriding RDP options from the URL
+The `/connect` endpoint can apply caller-supplied RDP setting overrides from
+URL query parameters when (and only when) the operator explicitly opts in.
+This lets users vary settings such as multi-monitor, audio mode or
+clipboard redirection without maintaining separate RDP templates.
+
+The query parameter name is the underlying RDP key with whitespace removed
+and lowercased. For example:
+
+| RDP key (in the file) | Query parameter |
+|-----------------------|-----------------|
+| `use multimon`        | `usemultimon`   |
+| `audiomode`           | `audiomode`     |
+| `redirectclipboard`   | `redirectclipboard` |
+| `screen mode id`      | `screenmodeid`  |
+
+Values are validated against the field type: booleans accept `0`/`1` or
+`true`/`false`, integers must parse as base-10 numbers, strings are taken
+verbatim. Unknown query parameters are ignored so the existing `host`,
+etc. continue to work.
+
+To enable, list the keys you want to expose under `client.rdpoverridablekeys`
+in your YAML configuration (or via the `RDPGW_CLIENT__RDPOVERRIDABLEKEYS`
+environment variable as a space-separated list):
+
+```yaml
+client:
+  rdpoverridablekeys:
+    - use multimon
+    - audiomode
+```
+
+With the snippet above, `https://your-gateway/connect?usemultimon=1` adds
+`use multimon:i:1` to the generated RDP file. Keys that are not on the
+allow-list are rejected with `400 Bad Request`. Authoritative settings
+controlled by the gateway (gateway address, access token, full address,
+username) always win over URL parameters even if an operator adds those
+keys to the allow-list — but adding sensitive keys is still discouraged.
 
 ## Integration
 The gateway exposes an endpoint for the verification of user tokens at

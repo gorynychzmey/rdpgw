@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,6 +37,10 @@ var opts struct {
 }
 
 var conf config.Configuration
+
+func listenAddress(bindAddress string, port int) string {
+	return net.JoinHostPort(bindAddress, strconv.Itoa(port))
+}
 
 func initOIDC(callbackUrl *url.URL) *web.OIDC {
 	// set oidc config
@@ -101,6 +106,8 @@ func main() {
 		conf.Server.MaxSessionLength,
 	)
 
+	web.InitTrustedProxies(conf.Server.TrustedProxies)
+
 	// configure web backend
 	w := &web.Config{
 		QueryInfo:        security.QueryInfo,
@@ -109,14 +116,17 @@ func main() {
 		Hosts:            conf.Server.Hosts,
 		HostSelection:    conf.Server.HostSelection,
 		RdpOpts: web.RdpOpts{
-			UsernameTemplate: conf.Client.UsernameTemplate,
-			SplitUserDomain:  conf.Client.SplitUserDomain,
-			NoUsername:       conf.Client.NoUsername,
+			UsernameTemplate:   conf.Client.UsernameTemplate,
+			SplitUserDomain:    conf.Client.SplitUserDomain,
+			NoUsername:         conf.Client.NoUsername,
+			OverridableRdpKeys: conf.Client.RdpOverridableKeys,
 		},
-		GatewayAddress: url,
-		TemplateFile:   conf.Client.Defaults,
-		RdpSigningCert: conf.Client.SigningCert,
-		RdpSigningKey:  conf.Client.SigningKey,
+		GatewayAddress:           url,
+		TemplateFile:             conf.Client.Defaults,
+		RdpSigningCert:           conf.Client.SigningCert,
+		RdpSigningKey:            conf.Client.SigningKey,
+		AllowedDestinationPorts:  conf.Server.AllowedDestinationPorts,
+		AllowPrivateDestinations: conf.Server.AllowPrivateDestinations,
 	}
 
 	if conf.Caps.TokenAuth {
@@ -172,7 +182,7 @@ func main() {
 			cfg.GetCertificate = certMgr.GetCertificate
 
 			go func() {
-				http.ListenAndServe(":80", certMgr.HTTPHandler(nil))
+				http.ListenAndServe(listenAddress(conf.Server.BindAddress, 80), certMgr.HTTPHandler(nil))
 			}()
 		}
 	}
@@ -246,12 +256,16 @@ func main() {
 
 	// header auth (configurable proxy)
 	if conf.Server.HeaderEnabled() {
-		log.Printf("enabling header authentication with user header: %s", conf.Header.UserHeader)
+		if len(conf.Header.TrustedProxies) == 0 {
+			log.Fatalf("header authentication is enabled but `header.trustedproxies` is empty; refusing to start in an exploitable configuration")
+		}
+		log.Printf("enabling header authentication with user header: %s (trusted proxies: %v)", conf.Header.UserHeader, conf.Header.TrustedProxies)
 		headerConfig := &web.HeaderConfig{
 			UserHeader:        conf.Header.UserHeader,
 			UserIdHeader:      conf.Header.UserIdHeader,
 			EmailHeader:       conf.Header.EmailHeader,
 			DisplayNameHeader: conf.Header.DisplayNameHeader,
+			TrustedProxies:    conf.Header.TrustedProxies,
 		}
 		headerAuth := headerConfig.New()
 		r.Handle("/connect", headerAuth.Authenticated(http.HandlerFunc(h.HandleDownload)))
@@ -317,7 +331,7 @@ func main() {
 
 	// setup server
 	server := http.Server{
-		Addr:         ":" + strconv.Itoa(conf.Server.Port),
+		Addr:         listenAddress(conf.Server.BindAddress, conf.Server.Port),
 		Handler:      r,
 		TLSConfig:    cfg,
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)), // disable http2

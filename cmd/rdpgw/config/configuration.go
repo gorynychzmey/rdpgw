@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -12,6 +13,45 @@ import (
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 )
+
+// knownDefaultSecrets is the list of placeholder session/token-key values
+// that appear in README.md and the dev compose files. Operators that
+// copy-paste the examples into a real deployment would be running with
+// widely-published keys, so the gateway refuses to start when one of these
+// is set for any of the session-/token-binding fields.
+var knownDefaultSecrets = []string{
+	"thisisasessionkeyreplacethisjetzt",
+	"thisisasessionkeyreplacethisjetz",
+	"thisisasessionkeyreplacethisnunu!",
+	"thisisasessionkeyreplacethisnunu",
+	"thisisasessionencryptionkey12345",
+}
+
+func checkDefaultSecrets(c *Configuration) error {
+	fields := []struct {
+		name  string
+		value string
+	}{
+		{"server.sessionkey", c.Server.SessionKey},
+		{"server.sessionencryptionkey", c.Server.SessionEncryptionKey},
+		{"security.paatokensigningkey", c.Security.PAATokenSigningKey},
+		{"security.paatokenencryptionkey", c.Security.PAATokenEncryptionKey},
+		{"security.usertokensigningkey", c.Security.UserTokenSigningKey},
+		{"security.usertokenencryptionkey", c.Security.UserTokenEncryptionKey},
+		{"security.querytokensigningkey", c.Security.QueryTokenSigningKey},
+	}
+	for _, f := range fields {
+		if f.value == "" {
+			continue
+		}
+		for _, def := range knownDefaultSecrets {
+			if f.value == def {
+				return fmt.Errorf("%s is set to a known placeholder value (%q); replace it with a unique secret before starting", f.name, def)
+			}
+		}
+	}
+	return nil
+}
 
 const (
 	TlsDisable = "disable"
@@ -42,6 +82,7 @@ type Configuration struct {
 type ServerConfig struct {
 	GatewayAddress       string   `koanf:"gatewayaddress"`
 	Port                 int      `koanf:"port"`
+	BindAddress          string   `koanf:"bindaddress"`
 	CertFile             string   `koanf:"certfile"`
 	KeyFile              string   `koanf:"keyfile"`
 	Hosts                []string `koanf:"hosts"`
@@ -56,6 +97,19 @@ type ServerConfig struct {
 	Authentication       []string `koanf:"authentication"`
 	AuthSocket           string   `koanf:"authsocket"`
 	BasicAuthTimeout     int      `koanf:"basicauthtimeout"`
+	// AllowedDestinationPorts gates the TCP ports `hostselection: any` may
+	// forward to. Empty defaults to {3389}. Ignored for the curated host
+	// modes (roundrobin, signed, unsigned).
+	AllowedDestinationPorts []int `koanf:"alloweddestinationports"`
+	// AllowPrivateDestinations, when true, lets `hostselection: any`
+	// forward to loopback, RFC1918, link-local, and IPv6 ULA targets.
+	// Default false.
+	AllowPrivateDestinations bool `koanf:"allowprivatedestinations"`
+	// TrustedProxies is the CIDR allow-list of upstream proxies whose
+	// X-Forwarded-For header is honored when deriving the client IP.
+	// Empty (the default) makes the gateway ignore X-Forwarded-For
+	// entirely and use r.RemoteAddr.
+	TrustedProxies []string `koanf:"trustedproxies"`
 }
 
 type KerberosConfig struct {
@@ -74,6 +128,9 @@ type HeaderConfig struct {
 	UserIdHeader    string `koanf:"useridheader"`
 	EmailHeader     string `koanf:"emailheader"`
 	DisplayNameHeader string `koanf:"displaynameheader"`
+	// TrustedProxies is the CIDR allow-list of upstream proxies allowed to
+	// stamp UserHeader (and friends). Empty disables header auth at runtime.
+	TrustedProxies  []string `koanf:"trustedproxies"`
 }
 
 type RDGCapsConfig struct {
@@ -108,6 +165,11 @@ type ClientConfig struct {
 	NoUsername       bool   `koanf:"nousername"`
 	SigningCert      string `koanf:"signingcert"`
 	SigningKey       string `koanf:"signingkey"`
+	// RdpOverridableKeys is the operator allow-list of RDP setting keys that
+	// the /connect endpoint may override from URL query parameters. Empty
+	// disables URL-based overrides. Entries are normalized (lowercase, no
+	// whitespace), so "use multimon" and "usemultimon" are equivalent.
+	RdpOverridableKeys []string `koanf:"rdpoverridablekeys"`
 }
 
 func ToCamel(s string) string {
@@ -154,6 +216,7 @@ func Load(configFile string) Configuration {
 	k.Load(confmap.Provider(map[string]interface{}{
 		"Server.Tls":                 "auto",
 		"Server.Port":                443,
+		"Server.BindAddress":         "",
 		"Server.SessionStore":        "cookie",
 		"Server.HostSelection":       "roundrobin",
 		"Server.Authentication":      "openid",
@@ -197,6 +260,10 @@ func Load(configFile string) Configuration {
 	k.UnmarshalWithConf("Security", &Conf.Security, koanfTag)
 	k.UnmarshalWithConf("Client", &Conf.Client, koanfTag)
 	k.UnmarshalWithConf("Kerberos", &Conf.Kerberos, koanfTag)
+
+	if err := checkDefaultSecrets(&Conf); err != nil {
+		log.Fatalf("refusing to start: %s", err)
+	}
 
 	if len(Conf.Security.PAATokenEncryptionKey) != 32 {
 		Conf.Security.PAATokenEncryptionKey, _ = security.GenerateRandomString(32)
