@@ -86,7 +86,7 @@ function renderServers(servers) {
 
         const connectButton = document.createElement('button');
         connectButton.className = 'server-connect-button';
-        connectButton.textContent = server.app ? `Open ${server.name}` : `Connect to ${server.name}`;
+        connectButton.textContent = `Connect to ${server.name}`;
         connectButton.onclick = (e) => {
             e.stopPropagation();
             connectToServer(server, connectButton);
@@ -212,9 +212,7 @@ async function connectToServer(server, button) {
     try {
         // Build the RDP download URL
         let url = '/connect';
-        if (server.app) {
-            url += '?app=' + encodeURIComponent(server.app);
-        } else if (server.address) {
+        if (server.address) {
             url += '?host=' + encodeURIComponent(server.address);
         }
 
