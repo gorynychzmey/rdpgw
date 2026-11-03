@@ -4,6 +4,11 @@ on:
   push:
     branches: [ "master" ]
     tags: [ "v*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
 
@@ -11,35 +16,52 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    env:
+      # Docker Hub is an optional mirror: it is pushed only when the secrets exist.
+      DOCKER_USER: ${{ secrets.DOCKER_USER }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Image tags
+        id: tags
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          if [ "${{ github.ref_type }}" = "tag" ]; then tag="${{ github.ref_name }}"; else tag=latest; fi
+          ghcr="ghcr.io/${owner}/rdpgw:${tag}"
+          if [ "${{ github.ref_type }}" = "branch" ]; then ghcr="${ghcr},ghcr.io/${owner}/rdpgw:sha-${GITHUB_SHA::7}"; fi
+          hub=""
+          if [ -n "$DOCKER_USER" ]; then hub=",${owner}/rdpgw:${tag}"; fi
+          echo "list=${ghcr}${hub}" >> "$GITHUB_OUTPUT"
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Login to Docker Hub
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
-         username: ${{ secrets.DOCKER_USER }}
-         password: ${{ secrets.DOCKER_PASSWORD }}
-      - name: Build and push - latest
-        uses: docker/build-push-action@v3
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to Docker Hub
+        if: env.DOCKER_USER != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
         with:
           context: ./dev/docker
           file: ./dev/docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ github.repository_owner }}/rdpgw:latest
-      - name: Build and push - latest
-        uses: docker/build-push-action@v3
-        with:
-          context: ./dev/docker
-          file: ./dev/docker/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ github.repository_owner }}/rdpgw:${{ github.ref_name }}
+          # the Dockerfile clones the repository itself; bust the cache per commit
+          build-args: CACHEBUST=${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          tags: ${{ steps.tags.outputs.list }}
       - name: Update Docker Hub Description
+        if: env.DOCKER_USER != ''
         uses: peter-evans/dockerhub-description@v3
         with:
           username: ${{ secrets.DOCKER_USER }}
